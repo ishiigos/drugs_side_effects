@@ -1,34 +1,56 @@
-from flask import Flask, render_template, request
+# app.py
+import os
 import joblib
 import pandas as pd
+import requests
+from flask import Flask, render_template, request
 
 app = Flask(__name__)
 
-# Load model and preprocessor
-model = joblib.load("models/model.pkl")
-preprocessor = joblib.load("models/preprocessor.pkl")
+# Google Drive direct download links
+MODEL_URL = "https://drive.google.com/uc?export=download&id=158o3lNYzaETd7J9rAl7ogwtdHwmkY39_"
+FEATURES_URL = "https://drive.google.com/uc?export=download&id=1iIy8DwC_bsN0Fd8JtYHqSBj2a-h3T-Yx"
+LABELS_URL = "https://drive.google.com/uc?export=download&id=1hdAKyhUhrmiaFAUjMeIZc6k_znoch7tk"
+
+# Local model path
+os.makedirs("models", exist_ok=True)
+MODEL_PATH = "models/model.pkl"
+FEATURES_PATH = "models/feature_names.pkl"
+LABELS_PATH = "models/target_labels.pkl"
+
+# Download model components if not already present
+def download_if_needed(url, filepath):
+    if not os.path.exists(filepath):
+        print(f"Downloading {filepath}...")
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(filepath, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+download_if_needed(MODEL_URL, MODEL_PATH)
+download_if_needed(FEATURES_URL, FEATURES_PATH)
+download_if_needed(LABELS_URL, LABELS_PATH)
+
+# Load model and metadata
+model = joblib.load(MODEL_PATH)
+feature_names = joblib.load(FEATURES_PATH)
+target_labels = joblib.load(LABELS_PATH)
 
 @app.route("/", methods=["GET", "POST"])
 def index():
     prediction = None
-
+    user_input = {}
     if request.method == "POST":
-        # Extract user input
-        age = request.form.get("age", type=float)
-        gender = request.form.get("gender")
-        bmi = request.form.get("bmi", type=float)
+        user_input = {name: request.form.get(name, "") for name in feature_names}
+        input_df = pd.DataFrame([user_input])
+        try:
+            preds = model.predict(input_df)
+            prediction = [label for i, label in enumerate(target_labels) if preds[0][i] == 1]
+        except Exception as e:
+            prediction = [f"Error: {e}"]
 
-        input_df = pd.DataFrame([{
-            "age": age,
-            "gender": gender,
-            "bmi": bmi
-        }])
-
-        # Preprocess and predict
-        transformed = preprocessor.transform(input_df)
-        prediction = model.predict(transformed)[0]
-
-    return render_template("index.html", prediction=prediction)
+    return render_template("index.html", prediction=prediction, features=feature_names, user_input=user_input)
 
 if __name__ == "__main__":
     app.run(debug=True)
